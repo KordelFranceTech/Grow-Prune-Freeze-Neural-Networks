@@ -1,0 +1,20 @@
+# Example config: small world model variant for latency-budget experiments.
+# Inherits everything from default.yaml and overrides only architecture fields.
+
+base: default.yaml
+name: wm_small
+seed: 42
+notes: |
+  Smallest viable world model for tight latency budgets. Use to measure how
+  much capacity is actually needed for the rollout-statistics-match validation
+  test to pass. If this config still passes level-2 validation, the larger
+  default is over-provisioned.
+
+world_model:
+  architecture:
+    d_model: 64
+    n_layers: 2
+    n_heads: 2
+    d_ff: 128
+  training:
+    output_dir: checkpoints/wm_small/

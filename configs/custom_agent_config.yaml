@@ -1,0 +1,91 @@
+# Configuration for the custom NumPy Expected SARSA agent (custom_agent.py).
+# Identical to default.yaml's simulator/tokenization/reward settings;
+# differs only in algorithm tag and output directory.
+
+name: custom_agent
+seed: 42
+
+# ----------------------------------------------------------------------------
+# Simulator  (unchanged from default)
+# ----------------------------------------------------------------------------
+simulator:
+  dt: 0.1
+  episode_length: 50
+
+  domain_size: [20.0, 20.0]
+  source_position: random
+  source_strength: 1.0
+
+  filament:
+    diffusion_rate: 0.05
+    decay_time: 30.0
+    initial_radius: 0.01
+    mass: 0.1
+
+  wind:
+    type: ornstein_uhlenbeck
+    mean_speed: 1.0
+    mean_direction: 0.0
+    direction_volatility: 15.0
+    speed_volatility: 0.2
+    correlation_time: 2.0
+
+  sensors:
+    antenna_separation: 0.1
+    antenna_forward_offset: 0.08
+    noise_floor_sigma: 0.001
+    saturation: 1.0
+
+  agent:
+    forward_speed: 0.5
+    turn_rate: 90.0
+    cast_amplitude: 30.0
+
+  success_radius: 0.5
+
+# ----------------------------------------------------------------------------
+# Tokenization  (unchanged from default)
+# ----------------------------------------------------------------------------
+tokenization:
+  vocabulary_version: v1
+  concentration_bin_edges: [3.0, 6.0, 15.0, 45.0, 150.0, 600.0]
+  wind_n_octants: 8
+  wind_zero_threshold: 0.05
+  actions:
+    - forward
+    - turn_left_15
+    - turn_right_15
+    - turn_around
+    - cast_left
+    - cast_right
+
+# ----------------------------------------------------------------------------
+# RL Agent — NumPy one-hidden-layer Expected SARSA (custom_agent.py)
+# ----------------------------------------------------------------------------
+rl_agent:
+  algorithm: expected_sarsa_numpy   # signals train_custom.py to use custom_agent.py
+
+  # Network architecture
+  network:
+    hidden_dim: 64            # 22 → 64 → 6  (He init, ReLU, SGD + grad-norm clip)
+    learning_rate: 1.0e-3     # SGD step size
+
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 0.9995
+
+  # Training budget
+  n_episodes: 10000
+  max_steps_per_episode: 600
+  eval_every_episodes: 500
+  output_dir: checkpoints/custom/
+
+  # Reward shaping  (same as default)
+  reward:
+    source_found: 100.0
+    time_penalty: -0.01
+    whiff_bonus: 0.3
+    blank_penalty: -0.05
+    whiff_threshold_multiplier: 3.0
+    blank_penalty_duration: 2.0

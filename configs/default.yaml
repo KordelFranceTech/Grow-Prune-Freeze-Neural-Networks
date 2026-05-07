@@ -1,0 +1,260 @@
+# Default configuration — canonical reference for all schema fields.
+# New experiments inherit from this and override only what they change.
+
+name: default
+seed: 42
+notes: |
+  Canonical baseline configuration. Starting values for all components.
+  Not optimized; intended as a sane reference point and a complete schema example.
+
+# ----------------------------------------------------------------------------
+# Simulator
+# ----------------------------------------------------------------------------
+simulator:
+  # Time discretization
+  dt: 0.1                     # seconds per simulation step (10 Hz)
+  episode_length: 50         # max steps per trajectory (60 seconds)
+
+  # Spatial domain
+  domain_size: [20.0, 20.0]   # meters, x and y extents
+  source_position: random     # "random" or [x, y]
+  source_strength: 1.0        # filaments per second emitted
+
+  # Filament model
+  filament:
+    diffusion_rate: 0.05      # m^2/s, controls filament growth with age
+    decay_time: 30.0          # seconds, filament lifetime
+    initial_radius: 0.01      # meters, filament radius at release
+    mass: 0.1                 # mass per filament; calibrated so near-source readings saturate the sensor
+
+  # Wind model
+  wind:
+    type: ornstein_uhlenbeck  # "constant", "gaussian_gust", "ornstein_uhlenbeck"
+    mean_speed: 1.0           # m/s
+    mean_direction: 0.0       # degrees, 0 = +x direction
+    direction_volatility: 15.0 # degrees, std of OU process for direction
+    speed_volatility: 0.2     # m/s, std of OU process for speed
+    correlation_time: 2.0     # seconds, OU correlation time
+
+  # Sensor model
+  sensors:
+    antenna_separation: 0.1  # meters, distance between left and right antenna
+    antenna_forward_offset: 0.08 # meters, antennae positioned in front of body center
+    noise_floor_sigma: 0.001  # arbitrary concentration units; sets the σ used for bin boundaries
+    saturation: 1.0           # max sensor reading (in same units)
+
+  # Agent kinematics during data generation
+  agent:
+    forward_speed: 0.5        # m/s
+    turn_rate: 90.0           # degrees per second when turning
+    cast_amplitude: 30.0      # degrees, side-to-side cast angle
+
+  # Navigation success criterion (shared by RL agent and planner)
+  success_radius: 0.5         # meters; reaching this distance counts as source found
+
+  # Dataset generation
+  dataset:
+    n_trajectories: 20
+    initial_position: random_in_plume_cone  # see simulator/policies.py
+    behavior_policy_mix:      # weights must sum to 1.0
+      random_walk: 0.2
+      reactive: 0.4
+      surge_and_cast: 0.4
+    output_path: data/trajectories/default/
+
+# ----------------------------------------------------------------------------
+# Tokenization
+# ----------------------------------------------------------------------------
+tokenization:
+  vocabulary_version: v1      # bumping this invalidates all checkpoints
+
+  # Concentration bins, expressed as multipliers of noise_floor_sigma.
+  # First entry is the upper edge of BLANK; remaining entries are upper edges of C0...C5.
+  # Calibrate from simulator histograms; see tokenization/calibrate.py.
+  concentration_bin_edges: [3.0, 6.0, 15.0, 45.0, 150.0, 600.0]
+
+  # Wind direction quantization
+  wind_n_octants: 8           # number of bins
+  wind_zero_threshold: 0.05   # m/s; below this, wind is mapped to W_0 by default
+
+  # Action space (vocabulary size = len of this list)
+  # TODO add "halt" action
+  actions:
+    - forward
+    - turn_left_15
+    - turn_right_15
+    - turn_around
+    - cast_left
+    - cast_right
+
+# ----------------------------------------------------------------------------
+# World model
+# ----------------------------------------------------------------------------
+world_model:
+  # Architecture
+  architecture:
+    d_model: 96
+    n_layers: 3
+    n_heads: 3
+    d_ff: 256                 # feedforward hidden dim, typically 2-4× d_model
+    activation: relu          # "relu" or "gelu"; relu is simpler in C
+    positional_encoding: learned  # "learned" or "sinusoidal"
+    pre_norm: true
+    dropout: 0.1              # training only; 0 at inference
+
+  # Sequence
+  context_length_timesteps: 48 # 4.8 seconds of history at 10 Hz
+  # Each timestep occupies 2 token positions (obs + action), so 96 positions total.
+
+  # Training
+  training:
+    batch_size: 64
+    n_steps: 100000
+    learning_rate: 3.0e-4
+    warmup_steps: 1000
+    weight_decay: 0.01
+    grad_clip: 1.0
+    val_every: 1000
+    checkpoint_every: 5000
+    val_split: 0.05           # fraction of trajectories held out
+    output_dir: checkpoints/default/
+
+  # Inference
+  inference:
+    use_kv_cache: true
+    sampling: temperature     # "temperature", "top_k", "nucleus"
+    temperature: 1.0
+    top_k: null               # used only if sampling == "top_k"
+    nucleus_p: null           # used only if sampling == "nucleus"
+
+# ----------------------------------------------------------------------------
+# Planner
+# ----------------------------------------------------------------------------
+planner:
+  # Rollout settings
+  num_rollouts_per_action: 8
+  rollout_length_timesteps: 10  # 1.0 second of imagined future at 10 Hz
+  rollout_action_strategy: repeat_candidate
+    # "repeat_candidate": agent repeats the candidate action for the rollout
+    # "default_policy": use a cheap reactive policy for in-rollout actions
+    # "recursive": replan inside the rollout (expensive; not recommended initially)
+
+  # Replanning
+  replan_every_steps: 1       # replan at every control step
+
+  # Scoring
+  scoring:
+    type: handcrafted         # "handcrafted" or "learned_value"
+    weights:
+      whiff_count: 1.0
+      upwind_progress: 2.0
+      blank_penalty: 0.5
+      concentration_trend: 1.0
+    aggregation: mean         # "mean", "mean_minus_std", "quantile_25"
+    risk_lambda: 0.0          # used only if aggregation == "mean_minus_std"
+
+  # Learned value head (Phase 2; ignored when scoring.type == handcrafted)
+  learned_value:
+    checkpoint: null
+    train_steps: 50000
+    learning_rate: 1.0e-4
+
+# ----------------------------------------------------------------------------
+# Validation
+# ----------------------------------------------------------------------------
+validation:
+  # Which test levels to run; see validation/SKILL.md
+  run_tokenization_tests: true
+  run_world_model_tests: true
+  run_navigation_tests: true
+
+  # Tokenization fidelity thresholds
+  tokenization:
+    whiff_rate_tolerance: 0.05
+    blank_duration_tolerance: 0.10
+    concentration_log_tolerance: 0.2
+    autocorrelation_tolerance: 0.05
+    min_mutual_information_bits: 1.0
+
+  # World model thresholds
+  world_model:
+    rollout_statistics_tolerance: 0.15
+    calibration_max_ece: 0.05  # expected calibration error per stream
+
+  # End-to-end navigation thresholds
+  navigation:
+    scenarios:
+      - easy
+      - medium
+      - hard
+      - out_of_distribution
+    n_seeds_per_scenario: 50
+    time_budget_seconds: 60
+    success_radius_m: 0.5     # within this distance of source counts as success
+    must_beat_baseline: reactive  # full agent must outperform this baseline on success rate
+
+# ----------------------------------------------------------------------------
+# RL Agent (Expected SARSA)
+# ----------------------------------------------------------------------------
+rl_agent:
+  algorithm: expected_sarsa_nn
+
+  # Neural network Q-function
+  network:
+    hidden_dim: 64            # neurons in the single hidden layer
+    learning_rate: 1.0e-3     # SGD step size; replaces the old tabular alpha
+
+  gamma: 0.99                 # discount factor
+  epsilon_start: 1.0          # initial exploration rate
+  epsilon_end: 0.05           # final exploration rate
+  epsilon_decay: 0.9995       # multiplicative decay applied after each episode
+
+  # Training budget
+  n_episodes: 20000
+  max_steps_per_episode: 600  # 60 seconds at 10 Hz (matches validation.navigation.time_budget_seconds)
+  eval_every_episodes: 500
+  output_dir: checkpoints/rl/
+
+  # Reward shaping
+  reward:
+    source_found: 100.0       # terminal reward for reaching the source
+    time_penalty: -0.01       # per-step penalty to encourage efficiency
+    whiff_bonus: 0.3          # any antenna reads above threshold
+    blank_penalty: -0.05      # applied per step after blank_penalty_duration of silence
+    whiff_threshold_multiplier: 3.0   # noise_floor * this = whiff detection threshold
+    blank_penalty_duration: 2.0       # seconds of continuous blank before penalty activates
+
+# ----------------------------------------------------------------------------
+# GPF Agent (Grow-Prune-Freeze Expected SARSA)
+# Shares rl_agent.network, gamma, epsilon_*, n_episodes, max_steps, reward.
+# ----------------------------------------------------------------------------
+gpf_agent:
+  output_dir: checkpoints/gpf/
+
+  # Grow (Table 7.1: εe, εk): add a layer when episode-level TD-error
+  # improvement EMA stagnates below eps_add
+  grow:
+    eps_add: 0.005            # improvement threshold; tighter → requires more sustained stagnation
+    M_add: 50                 # sliding window in episodes (longer window = smoother signal)
+    cooldown_episodes: 200    # min episodes between consecutive grow events (εk)
+    min_episodes_before_grow: 300  # warm-up before GPF activates (εe)
+    max_hidden_layers: 6      # hard cap on depth (user specified)
+    ema_beta: 0.9             # EMA smoothing factor
+
+  # Belief system (Table 7.1: ϑv, ϑp, φh)
+  belief:
+    tau_belief_harden: 0.02   # ϑv: |w| must exceed this to increment belief
+    tau_belief_prune: 0.3     # ϑp: belief below this → weight is pruneable
+
+  # Prune (Table 7.1: εp): OBD saliency + belief protection
+  prune:
+    tau_prune: 1.0e-8         # OBD saliency threshold
+    prune_accum_steps: 500    # εp: fresh gradient steps before pruning fires
+
+  # Freeze (Table 7.1: εf, ϑf): weight-stability snapshot criterion
+  freeze:
+    tau_freeze_delta: 0.01    # ϑf: weight change below this counts as stable
+    tau_freeze_frac: 0.9      # fraction of layer weights that must be stable
+    freeze_check_interval: 300  # steps between stability snapshot comparisons
+    freeze_patience: 3        # εf: consecutive stable checks before freezing
+    min_episodes_before_freeze: 100  # warm-up before freeze checks begin
