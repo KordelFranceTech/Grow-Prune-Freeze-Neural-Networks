@@ -1,0 +1,117 @@
+# Experiment 2: Fix the three cascading bugs identified in Experiment 1:
+#
+#  Bug 1 — Grow trigger too sensitive:
+#    eps_add=0.005 fires because EMA improvement oscillates near zero in RL
+#    (TD error is noisy/non-monotone, unlike supervised learning).
+#    Fix: eps_add 0.005 → 0.1. Require genuine, sustained stagnation.
+#
+#  Bug 2 — Deepcopy of pruned layer for new layer init:
+#    Grow N deepcopied from layer N-1 which may have ≤15% nonzero weights
+#    after pruning → new layer starts with degraded capacity.
+#    Fix (code change): always use near-identity init for grown layers.
+#
+#  Bug 3 — Optimizer momentum reset:
+#    Every grow/freeze created fresh Adam optimizer, discarding all momentum.
+#    Fix (code change, exp1 already uses this): add_param_group on grow,
+#    state-preserving rebuild on freeze.
+#
+# Additional:
+#  - faster epsilon decay (0.999) so 3000-ep budget is better exploited
+#  - longer prune accumulation (1000 steps) for better OBD gradient estimates
+
+name: exp2_optimizer_fix
+seed: 42
+
+experiment:
+  n_episodes: 3000
+  eval_every: 500
+  notes: >
+    Three bug fixes: (1) eps_add 0.005→0.1 to stop runaway grow; (2) near-identity
+    init for all grown layers (no deepcopy of pruned weights); (3) optimizer
+    state preservation on grow/freeze. Also faster epsilon decay and longer prune
+    accumulation window.
+
+simulator:
+  dt: 0.1
+  episode_length: 50
+  domain_size: [20.0, 20.0]
+  source_position: random
+  source_strength: 1.0
+  filament:
+    diffusion_rate: 0.05
+    decay_time: 30.0
+    initial_radius: 0.01
+    mass: 0.1
+  wind:
+    type: ornstein_uhlenbeck
+    mean_speed: 1.0
+    mean_direction: 0.0
+    direction_volatility: 15.0
+    speed_volatility: 0.2
+    correlation_time: 2.0
+  sensors:
+    antenna_separation: 0.1
+    antenna_forward_offset: 0.08
+    noise_floor_sigma: 0.001
+    saturation: 1.0
+  agent:
+    forward_speed: 0.5
+    turn_rate: 90.0
+    cast_amplitude: 30.0
+  success_radius: 0.5
+
+tokenization:
+  vocabulary_version: v1
+  concentration_bin_edges: [3.0, 6.0, 15.0, 45.0, 150.0, 600.0]
+  wind_n_octants: 8
+  wind_zero_threshold: 0.05
+  actions:
+    - forward
+    - turn_left_15
+    - turn_right_15
+    - turn_around
+    - cast_left
+    - cast_right
+
+rl_agent:
+  algorithm: expected_sarsa_nn
+  network:
+    hidden_dim: 64
+    learning_rate: 1.0e-3
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 0.999          # ε≈0.05 at ep 3000 (vs ε≈0.22 with default 0.9995)
+  n_episodes: 3000
+  max_steps_per_episode: 600
+  eval_every_episodes: 500
+  output_dir: checkpoints/gpf/
+  reward:
+    source_found: 100.0
+    time_penalty: -0.01
+    whiff_bonus: 0.3
+    blank_penalty: -0.05
+    whiff_threshold_multiplier: 3.0
+    blank_penalty_duration: 2.0
+
+gpf_agent:
+  output_dir: checkpoints/gpf/
+  grow:
+    eps_add: 0.1                # KEY FIX: was 0.005; RL TD improvements are <0.005
+    M_add: 50                   # keep 50-episode window for smoothing
+    cooldown_episodes: 300      # min 300 eps between grows
+    min_episodes_before_grow: 500  # let seed layer converge first
+    max_hidden_layers: 6
+    ema_beta: 0.9
+  belief:
+    tau_belief_harden: 0.02
+    tau_belief_prune: 0.3
+  prune:
+    tau_prune: 1.0e-6           # slightly less aggressive than 1e-8
+    prune_accum_steps: 1000     # more gradient data for reliable OBD saliency
+  freeze:
+    tau_freeze_delta: 0.01
+    tau_freeze_frac: 0.9
+    freeze_check_interval: 300
+    freeze_patience: 3
+    min_episodes_before_freeze: 100

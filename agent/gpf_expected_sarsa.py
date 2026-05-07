@@ -91,24 +91,17 @@ class _GPFQNetwork(nn.Module):
         """
         Append one H→H hidden layer before the output layer.
 
-        First grow (n_hidden == 1): seed layer is input_dim→H so deepcopy
-        would produce the wrong shape.  Create fresh H→H near-identity layer
-        to preserve the learned Q-function (dynamical isometry).
-
-        Subsequent grows: perturbed deepcopy of the last H→H layer, matching
-        the AdaptiveGPT reference implementation.
+        Always uses near-identity initialization (I + small noise), preserving
+        the learned Q-function via dynamical isometry regardless of grow count.
+        Deepcopy of a previously pruned layer is intentionally avoided: a pruned
+        layer may have ≤15% nonzero weights, which would cripple the new layer's
+        starting capacity.
         """
         H = self.hidden_dim
-        if len(self.hidden_layers) == 1:
-            new_layer = nn.Linear(H, H)
-            with torch.no_grad():
-                new_layer.weight.data = torch.eye(H) + 0.01 * torch.randn(H, H)
-                new_layer.bias.data = 0.01 * torch.randn(H)
-        else:
-            new_layer = copy.deepcopy(self.hidden_layers[-1])
-            with torch.no_grad():
-                for p in new_layer.parameters():
-                    p.data += 0.01 * torch.randn_like(p)
+        new_layer = nn.Linear(H, H)
+        with torch.no_grad():
+            new_layer.weight.data = torch.eye(H) + 0.01 * torch.randn(H, H)
+            new_layer.bias.data = 0.01 * torch.randn(H)
         self.hidden_layers.append(new_layer)
         return new_layer
 
@@ -393,7 +386,7 @@ class GPFExpectedSARSA:
 
         if self._ema_improvement < self.eps_add:
             n_before = self.network.n_hidden
-            self.network.add_hidden_layer()
+            new_layer = self.network.add_hidden_layer()
             self._add_belief_slots()
             self._freeze_stable_count.append(0)
             print(
@@ -402,7 +395,7 @@ class GPFExpectedSARSA:
             )
             self._init_sq_grad_accum()
             self._prune_pending = True
-            self._rebuild_optimizer()
+            self._optimizer_add_layer(new_layer)
             self._episodes_since_grow = 0
 
     # ------------------------------------------------------------------
@@ -525,12 +518,32 @@ class GPFExpectedSARSA:
         )
 
     # ------------------------------------------------------------------
-    # Optimiser rebuild (called after grow or freeze)
+    # Optimiser management (grow → add_param_group; freeze → state-preserving)
     # ------------------------------------------------------------------
 
+    def _optimizer_add_layer(self, new_layer: nn.Module):
+        """Add a just-grown layer's parameters as a new param group.
+
+        Using add_param_group preserves all accumulated Adam first/second moment
+        estimates for the existing layers — no momentum is discarded on grow.
+        """
+        new_params = [p for p in new_layer.parameters() if p.requires_grad]
+        self.optimizer.add_param_group({'params': new_params, 'lr': self.lr})
+
     def _rebuild_optimizer(self):
+        """Rebuild optimizer after a freeze event, preserving Adam state.
+
+        After a layer is frozen its parameters are excluded from the new
+        optimizer's param list.  We copy the Adam state tensors (exp_avg,
+        exp_avg_sq, step) for every parameter that survived, so the frozen
+        layer's removal doesn't reset the momentum of the remaining layers.
+        """
+        old_state = dict(self.optimizer.state)
         trainable = [p for p in self.network.parameters() if p.requires_grad]
         self.optimizer = torch.optim.Adam(trainable, lr=self.lr)
+        for p in trainable:
+            if p in old_state:
+                self.optimizer.state[p] = old_state[p]
 
     # ------------------------------------------------------------------
     # Persistence
