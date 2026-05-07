@@ -77,6 +77,10 @@ def run_experiment(cfg, tag='', seed=None):
             eval_points.append(ep)
             success_rates.append(sr)
 
+            # Notify agent of eval result — enables eval-based grow trigger
+            if hasattr(agent, 'notify_eval'):
+                agent.notify_eval(sr)
+
             layers_str = ''
             if hasattr(agent, 'network'):
                 layers_str = f"  layers={agent.network.n_hidden}"

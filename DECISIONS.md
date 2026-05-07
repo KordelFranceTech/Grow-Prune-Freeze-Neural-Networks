@@ -83,3 +83,19 @@ These document the choices already baked into the initial project setup.
 ## Active decisions
 
 (append new entries below this line)
+
+---
+
+## 2026-05-07: Reflecting domain boundaries instead of OOB termination
+
+**Decision:** When the agent's position exceeds the domain bounds, clip it to the boundary (reflect) rather than terminating the episode. The `done` signal no longer includes `not in_bounds`.
+
+**Context:** During autoresearch (GPF optimization), the reactive baseline scored 0% across 200 episodes — not because the task is impossible but because the heuristic policy (turn upwind, cast on blank) has no boundary awareness and repeatedly walks off the domain edge within 100–300 steps. The RL agent also terminates prematurely for the same reason, receiving no learning signal about *why* the episode ended.
+
+**Reasoning:** The agent's observation (left_bin, right_bin, wind_octant) contains no boundary proximity information. Terminating on OOB creates an unexplainable reward cliff: the agent gets a negative outcome (episode ends) with no input signal that distinguishes "near boundary" from "not near boundary". This makes boundary avoidance impossible to learn directly and turns every training episode into a coin-flip on whether the random walk happened to stay in bounds. Reflecting boundaries let episodes run to max_steps or success, giving the agent 10× more gradient signal per episode and making the reactive baseline non-trivially comparable.
+
+**Trade-off:** A real robot would have some boundary sensing (LIDAR, GPS fence, etc.) or truly fail by going out of range. Reflecting walls are an abstraction, but they are strictly dominated by adding a boundary sensor to the state. Adding the sensor is the right long-term fix (Phase 2); reflecting boundaries fix the training dynamics now without breaking the existing tokenization contract.
+
+**Reversal trigger:** Add domain boundary distance as a new state token (fourth stream in the observation). At that point, restore OOB termination so the agent must learn active boundary avoidance rather than being bailed out by clipping.
+
+**Affected components:** `simulator/filament_sim.py` (`step()`), all RL training loops.

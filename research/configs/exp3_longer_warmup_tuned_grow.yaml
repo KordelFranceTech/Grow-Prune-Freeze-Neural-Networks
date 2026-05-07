@@ -1,34 +1,30 @@
-# Experiment 3: Tuned grow trigger on top of the exp2 improvements.
+# Experiment 3: Adds one well-timed GPF grow to the stable Exp 2 setup.
 #
-# Observation from exp2: with a 3000-episode budget and min_episodes_before_grow=300,
-# the agent only gets ~700 episodes of single-layer learning before grow is possible.
-# Hypothesis: letting the single-layer network converge longer before growing
-# produces a better scaffold for the added layer (better near-identity target).
+# Exp 2 uses: reflecting walls, source_strength=5, distance_shaping=2.0, no grows.
+# Exp 3 hypothesis: after the single-layer converges (~ep 2000), adding one
+# hidden layer with near-identity init lets the agent learn a more refined
+# policy in the remaining 1000 episodes.
 #
-# Changes vs exp2:
-#   - min_episodes_before_grow: 300 → 500  (16% warmup on 3000-ep budget)
-#   - cooldown_episodes: 200 → 300         (cap at ~8 grows max in 3000 eps)
-#   - eps_add: 0.005 → 0.008               (slightly more eager grow trigger)
-#   - M_add: 50 → 30                       (shorter TD window, faster trigger)
-#   - lr: 1e-3 → 3e-3                      (faster initial learning, Adam handles it)
+# GPF grow trigger: eval-success-rate based (notify_eval in run_experiment.py)
+# - First grow eligible at ep 2000
+# - Grow fires when success rate improvement < 3% over recent eval history
 
-name: exp3_longer_warmup_tuned_grow
+name: exp3_single_grow
 seed: 42
 
 experiment:
   n_episodes: 3000
   eval_every: 500
   notes: >
-    Extended single-layer warmup (500 eps) so the seed layer is better trained
-    before the first grow. Faster grow response (M_add=30, eps_add=0.008).
-    Higher lr=3e-3 for faster initial convergence.
+    One GPF grow at ep ~2000 (eval-triggered). Same env fixes as exp2.
+    Tests whether depth increase after single-layer convergence improves results.
 
 simulator:
   dt: 0.1
   episode_length: 50
   domain_size: [20.0, 20.0]
   source_position: random
-  source_strength: 1.0
+  source_strength: 5.0
   filament:
     diffusion_rate: 0.05
     decay_time: 30.0
@@ -69,11 +65,11 @@ rl_agent:
   algorithm: expected_sarsa_nn
   network:
     hidden_dim: 64
-    learning_rate: 3.0e-3        # higher lr for faster early convergence
+    learning_rate: 1.0e-3
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.05
-  epsilon_decay: 0.999
+  epsilon_decay: 0.9995
   n_episodes: 3000
   max_steps_per_episode: 600
   eval_every_episodes: 500
@@ -81,29 +77,30 @@ rl_agent:
   reward:
     source_found: 100.0
     time_penalty: -0.01
-    whiff_bonus: 0.3
+    whiff_bonus: 1.0
     blank_penalty: -0.05
     whiff_threshold_multiplier: 3.0
     blank_penalty_duration: 2.0
+    distance_shaping: 2.0
 
 gpf_agent:
   output_dir: checkpoints/gpf/
   grow:
-    eps_add: 0.008               # more eager: grow when improvement nearly stalled
-    M_add: 30                    # shorter window for faster trigger response
-    cooldown_episodes: 300       # space grows out across the budget
-    min_episodes_before_grow: 500  # let seed layer converge before first grow
+    eps_add: 0.03               # grow when success rate hasn't improved by 3%
+    M_add: 6
+    cooldown_episodes: 2000     # eval_cooldown = max(2, 4) = 4 evals → 1 grow
+    min_episodes_before_grow: 2000
     max_hidden_layers: 6
     ema_beta: 0.9
   belief:
     tau_belief_harden: 0.02
     tau_belief_prune: 0.3
   prune:
-    tau_prune: 1.0e-8
-    prune_accum_steps: 300       # prune sooner after grow (fewer steps needed)
+    tau_prune: 1.0e-6
+    prune_accum_steps: 1000
   freeze:
-    tau_freeze_delta: 0.01
-    tau_freeze_frac: 0.9
-    freeze_check_interval: 200   # check stability more frequently
-    freeze_patience: 3
-    min_episodes_before_freeze: 200
+    tau_freeze_delta: 0.005
+    tau_freeze_frac: 0.95
+    freeze_check_interval: 300
+    freeze_patience: 5
+    min_episodes_before_freeze: 300

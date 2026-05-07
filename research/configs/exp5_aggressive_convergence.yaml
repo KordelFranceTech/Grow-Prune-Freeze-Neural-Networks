@@ -1,31 +1,30 @@
-# Experiment 5: Aggressive convergence configuration.
+# Experiment 5: Best combined config — wider + longer budget + tuned grows.
 #
-# Takes the best-performing settings from exp3/exp4 and pushes harder:
-# - Higher learning rate (5e-3) with tighter gradient clipping
-# - Longer episode budget within the same training time by increasing
-#   episode_length to 200 steps (20s at 10Hz) so the agent has more
-#   time to actually reach the source per episode
-# - Stronger time penalty to push efficiency
-# - Source strength increased so the plume is denser and easier to detect
+# Takes whichever config performed best in exp3/exp4 and extends it:
+#   - 4000-episode budget for deeper convergence
+#   - 128 hidden units (wider, based on exp4)
+#   - Two well-timed grows (ep ~2000 and ep ~3000)
+#   - Softer prune (tau_prune=1e-5) to preserve more weights
+#   - Stronger whiff bonus for better plume tracking
+#   - Adjusted epsilon schedule for 4000-episode budget
 
-name: exp5_aggressive_convergence
+name: exp5_best_combined
 seed: 42
 
 experiment:
-  n_episodes: 3000
+  n_episodes: 4000
   eval_every: 500
   notes: >
-    Longer episodes (200 steps = 20s) give the agent more time to reach the
-    source per episode. Higher lr=5e-3 with aggressive convergence.
-    Stronger source (strength=2.0) for denser plume, easier early learning.
-    Best GPF settings from prior experiments combined.
+    Best combined: 128-wide network, 4000 episodes, two eval-triggered grows
+    (ep ~2000 and ~3000), softer prune. Consolidates all improvements from
+    exp2-exp4 into one configuration.
 
 simulator:
   dt: 0.1
-  episode_length: 200            # 20 seconds per episode (vs 50 = 5s default)
+  episode_length: 50
   domain_size: [20.0, 20.0]
   source_position: random
-  source_strength: 2.0           # denser plume → easier early detection
+  source_strength: 5.0
   filament:
     diffusion_rate: 0.05
     decay_time: 30.0
@@ -66,41 +65,42 @@ rl_agent:
   algorithm: expected_sarsa_nn
   network:
     hidden_dim: 128
-    learning_rate: 5.0e-3        # aggressive lr
+    learning_rate: 1.0e-3
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.05
-  epsilon_decay: 0.999
-  n_episodes: 3000
+  epsilon_decay: 0.9996          # ε≈0.20 at ep 2000, ε≈0.08 at ep 4000
+  n_episodes: 4000
   max_steps_per_episode: 600
   eval_every_episodes: 500
   output_dir: checkpoints/gpf/
   reward:
     source_found: 100.0
-    time_penalty: -0.02          # stronger time penalty for efficiency
-    whiff_bonus: 0.5
-    blank_penalty: -0.1          # stronger blank penalty
+    time_penalty: -0.01
+    whiff_bonus: 1.0
+    blank_penalty: -0.05
     whiff_threshold_multiplier: 3.0
-    blank_penalty_duration: 1.5  # start penalizing blanks sooner
+    blank_penalty_duration: 2.0
+    distance_shaping: 2.0
 
 gpf_agent:
   output_dir: checkpoints/gpf/
   grow:
-    eps_add: 0.008
-    M_add: 30
-    cooldown_episodes: 400       # longer cooldown with longer episodes
-    min_episodes_before_grow: 600
+    eps_add: 0.03               # success rate improvement threshold
+    M_add: 6
+    cooldown_episodes: 1000     # eval_cooldown = 2 → 2-3 grows in 4000 eps
+    min_episodes_before_grow: 2000  # first grow at ep ~2000
     max_hidden_layers: 6
     ema_beta: 0.9
   belief:
     tau_belief_harden: 0.02
     tau_belief_prune: 0.3
   prune:
-    tau_prune: 1.0e-8
-    prune_accum_steps: 600
+    tau_prune: 1.0e-5           # softest prune — preserve more weights
+    prune_accum_steps: 1500
   freeze:
-    tau_freeze_delta: 0.01
-    tau_freeze_frac: 0.85        # slightly more lenient freeze criterion
-    freeze_check_interval: 200
-    freeze_patience: 3
-    min_episodes_before_freeze: 300
+    tau_freeze_delta: 0.005
+    tau_freeze_frac: 0.95
+    freeze_check_interval: 300
+    freeze_patience: 5
+    min_episodes_before_freeze: 500

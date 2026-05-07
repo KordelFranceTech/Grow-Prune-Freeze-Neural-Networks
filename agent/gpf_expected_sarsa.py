@@ -202,10 +202,14 @@ class GPFExpectedSARSA:
         self._n_episodes: int = 0
         self._episodes_since_grow: int = 0
 
-        # Grow: episode-level TD error history and EMA
+        # Grow: episode-level TD error history and EMA (legacy TD-based trigger)
         self._episode_td_buffer: list = []
         self._td_history: deque = deque(maxlen=M_add + 1)
         self._ema_improvement: float = 0.0
+
+        # Grow: eval-success-rate trigger (preferred for RL; set via notify_eval)
+        self._eval_sr_history: deque = deque(maxlen=M_add + 1)
+        self._evals_since_grow: int = 0
 
         # Prune: accumulated squared gradients
         self._sq_grad: dict = {}
@@ -351,6 +355,58 @@ class GPFExpectedSARSA:
             ep_avg = float(np.mean(self._episode_td_buffer))
             self._episode_td_buffer = []
             self._maybe_grow(ep_avg)
+
+    # ------------------------------------------------------------------
+    # Eval-based grow trigger (RL-appropriate: use success rate, not TD error)
+    # ------------------------------------------------------------------
+
+    def notify_eval(self, success_rate: float):
+        """
+        Call this after every evaluation run with the greedy success rate.
+
+        In RL, TD error is non-monotone and its improvement EMA stays near zero
+        regardless of actual learning progress.  Success rate is a cleaner signal:
+        grow when it has been flat (< eps_add improvement over M_add evals).
+
+        This overrides the episode-level TD-error grow trigger when called.
+        """
+        if self.network.n_hidden >= self.max_hidden_layers:
+            return
+
+        self._eval_sr_history.append(success_rate)
+        self._evals_since_grow += 1
+
+        if self._n_episodes < self.min_episodes_before_grow:
+            return
+        if len(self._eval_sr_history) < 2:
+            return
+
+        # Minimum cooldown in *evals* (converted from episode cooldown / eval_every).
+        # We store as episodes; here we use a raw eval count of at least 2.
+        eval_cooldown = max(2, self.cooldown_episodes // 500)
+        if self._evals_since_grow < eval_cooldown:
+            return
+
+        sr_list = list(self._eval_sr_history)
+        best_recent = max(sr_list[-max(2, len(sr_list) // 2):])
+        best_early  = max(sr_list[:max(1, len(sr_list) // 2)])
+        improvement = best_recent - best_early
+
+        if improvement < self.eps_add:
+            n_before = self.network.n_hidden
+            new_layer = self.network.add_hidden_layer()
+            self._add_belief_slots()
+            self._freeze_stable_count.append(0)
+            print(
+                f"[GPF] GROW (eval-trigger)  layer {n_before}→{self.network.n_hidden}  "
+                f"(ep={self._n_episodes}, sr_improve={improvement:.4g}, "
+                f"best_sr={max(sr_list):.2%})"
+            )
+            self._init_sq_grad_accum()
+            self._prune_pending = True
+            self._optimizer_add_layer(new_layer)
+            self._episodes_since_grow = 0
+            self._evals_since_grow = 0
 
     # ------------------------------------------------------------------
     # GPF — GROW (episode-level, Table 7.1: εe / εk)

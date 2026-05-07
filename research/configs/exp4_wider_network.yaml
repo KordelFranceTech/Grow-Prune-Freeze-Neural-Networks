@@ -1,29 +1,28 @@
-# Experiment 4: Wider initial network + refined reward shaping.
+# Experiment 4: Wider network (128 hidden) with two eval-triggered grows.
 #
-# Hypothesis: the 22→64→6 architecture may be too narrow for the 3000-episode
-# budget. A wider seed layer (128 hidden) gives more representational capacity
-# per grow event and may converge faster before the grow trigger fires.
-# Also strengthens the whiff bonus to reward the agent more for detecting odor.
+# Exp 2: single-layer 64-wide with env fixes.
+# Exp 3: single-layer 64-wide + one grow at ep 2000.
+# Exp 4: 128-wide base + two grows (at ep ~1500 and ep ~2500).
 #
-# Builds on exp3 best settings: optimizer fix, epsilon_decay=0.999, min_warmup=500.
+# 128-wide gives more capacity before any grow. Two grows explore whether
+# depth increase is more beneficial with a wider starting architecture.
 
-name: exp4_wider_network
+name: exp4_wider_two_grows
 seed: 42
 
 experiment:
   n_episodes: 3000
   eval_every: 500
   notes: >
-    Wider network (hidden_dim=128). Stronger whiff_bonus=0.5 to reinforce
-    staying on the plume. Larger prune_accum_steps=600 since wider layers
-    need more gradient samples for reliable OBD saliency estimates.
+    128-wide network, two eval-triggered grows. Same env as exp2/3.
+    Tests whether wider base + 2 grows outperforms 64-wide + 1 grow.
 
 simulator:
   dt: 0.1
   episode_length: 50
   domain_size: [20.0, 20.0]
   source_position: random
-  source_strength: 1.0
+  source_strength: 5.0
   filament:
     diffusion_rate: 0.05
     decay_time: 30.0
@@ -63,12 +62,12 @@ tokenization:
 rl_agent:
   algorithm: expected_sarsa_nn
   network:
-    hidden_dim: 128              # wider: 22→128→6 seed architecture
+    hidden_dim: 128
     learning_rate: 1.0e-3
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.05
-  epsilon_decay: 0.999
+  epsilon_decay: 0.9995
   n_episodes: 3000
   max_steps_per_episode: 600
   eval_every_episodes: 500
@@ -76,29 +75,30 @@ rl_agent:
   reward:
     source_found: 100.0
     time_penalty: -0.01
-    whiff_bonus: 0.5             # stronger: reward staying on plume
+    whiff_bonus: 1.0
     blank_penalty: -0.05
     whiff_threshold_multiplier: 3.0
     blank_penalty_duration: 2.0
+    distance_shaping: 2.0
 
 gpf_agent:
   output_dir: checkpoints/gpf/
   grow:
-    eps_add: 0.008
-    M_add: 30
-    cooldown_episodes: 300
-    min_episodes_before_grow: 500
+    eps_add: 0.03
+    M_add: 6
+    cooldown_episodes: 1000     # eval_cooldown = max(2, 2) = 2 evals → 2 grows
+    min_episodes_before_grow: 1500
     max_hidden_layers: 6
     ema_beta: 0.9
   belief:
     tau_belief_harden: 0.02
     tau_belief_prune: 0.3
   prune:
-    tau_prune: 1.0e-8
-    prune_accum_steps: 600       # wider layers need more gradient samples
+    tau_prune: 1.0e-6
+    prune_accum_steps: 1200
   freeze:
-    tau_freeze_delta: 0.01
-    tau_freeze_frac: 0.9
-    freeze_check_interval: 200
-    freeze_patience: 3
-    min_episodes_before_freeze: 200
+    tau_freeze_delta: 0.005
+    tau_freeze_frac: 0.95
+    freeze_check_interval: 300
+    freeze_patience: 5
+    min_episodes_before_freeze: 300
