@@ -99,3 +99,15 @@ These document the choices already baked into the initial project setup.
 **Reversal trigger:** Add domain boundary distance as a new state token (fourth stream in the observation). At that point, restore OOB termination so the agent must learn active boundary avoidance rather than being bailed out by clipping.
 
 **Affected components:** `simulator/filament_sim.py` (`step()`), all RL training loops.
+
+## 2026-05-07: Disable TD-error grow trigger; use eval success-rate trigger only
+
+**Decision:** Added `use_eval_trigger_only: true` config flag. When set, `_maybe_grow()` (episode-level TD-error EMA trigger) is skipped and only `notify_eval()` (eval success-rate stagnation trigger) can fire a grow.
+
+**Context:** Exp 3 (one grow at ep 2000) failed — best 61.5% vs Exp 2's 91% with no grows. The grow was triggered by `_maybe_grow()` at ep 2000 when the TD-error EMA went slightly negative (EMA_improve = −0.068 < eps_add = 0.03). By ep 2000 the single-layer network was already at 84.5% success; adding a layer at that point disrupted fine-tuned weights and the remaining 1000 episodes couldn't recover. `notify_eval()` would NOT have grown at ep 2000 (75.5% improvement >> 3% threshold), but both triggers share the same `min_episodes_before_grow` warmup, so `_maybe_grow()` fired first.
+
+**Reasoning:** In RL, TD-error is non-monotone — the EMA improvement signal is unreliable as a grow trigger because TD targets shift as the policy improves. Success rate is the right metric. The TD-error trigger is appropriate for supervised learning where loss is monotone; it should not run in RL mode.
+
+**Reversal trigger:** None expected for RL training. The TD-error trigger remains available (default `use_eval_trigger_only: false`) for non-RL supervised contexts.
+
+**Affected components:** `agent/gpf_expected_sarsa.py` (`_maybe_grow()`), `train_gpf.py` (`build_gpf()`), all experiment configs using grows.

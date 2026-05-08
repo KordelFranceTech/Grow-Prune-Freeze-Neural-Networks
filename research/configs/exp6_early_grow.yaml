@@ -1,22 +1,25 @@
-# Experiment 4: Wider network (128 hidden), no grows.
+# Experiment 6: 64-wide + early eval-triggered grow + lr=5e-4 + 4000 eps.
 #
-# Exp 2: 64-wide, no grows → 91% best (peak at ep 2500).
-# Exp 3: 64-wide, one grow at ep 2000 → 61.5% best (grow too late; disrupted convergence).
+# Exp 5: 64-wide, lr=5e-4, no grows, 4000 eps → target 92%+.
+# Exp 6 hypothesis: adding a single early grow (ep ~1000, when success rate
+# is stagnating at 5-9%) gives the 2-layer network 3000 episodes to improve
+# upon the 1-layer ceiling, potentially reaching 94-96%.
 #
-# Exp 4 hypothesis: 128-wide single-layer has more representational capacity
-# and should plateau higher than 64-wide without the disruption risk of grows.
-# This isolates the "width" dimension before testing width + depth.
+# Grow logic: eps_add=0.03 (3% improvement threshold), eval_cooldown=2,
+# min_episodes=500. With lr=5e-4, early curve expected 4-6% at ep500, 6-8%
+# at ep1000 → improvement ~2-3% < eps_add threshold → grow fires at ep1000.
+# use_eval_trigger_only prevents _maybe_grow() from firing on TD-error.
 
-name: exp4_wider_no_grow
+name: exp6_early_grow
 seed: 42
 
 experiment:
-  n_episodes: 3000
+  n_episodes: 4000
   eval_every: 500
   notes: >
-    128-wide network, no grows (min_episodes_before_grow=99999).
-    Tests whether wider base network alone beats exp2's 91% best.
-    Same env as exp2 (source_strength=5, distance_shaping=2.0, reflecting walls).
+    64-wide, lr=5e-4, one eval-triggered grow at ep ~1000 (early stagnation),
+    4000 episodes total. use_eval_trigger_only prevents TD-error trigger.
+    Tests: does early depth increase push beyond exp5's single-layer ceiling?
 
 simulator:
   dt: 0.1
@@ -63,13 +66,13 @@ tokenization:
 rl_agent:
   algorithm: expected_sarsa_nn
   network:
-    hidden_dim: 128
-    learning_rate: 1.0e-3
+    hidden_dim: 64
+    learning_rate: 5.0e-4
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.05
   epsilon_decay: 0.9995
-  n_episodes: 3000
+  n_episodes: 4000
   max_steps_per_episode: 600
   eval_every_episodes: 500
   output_dir: checkpoints/gpf/
@@ -85,13 +88,13 @@ rl_agent:
 gpf_agent:
   output_dir: checkpoints/gpf/
   grow:
-    eps_add: 0.03
+    eps_add: 0.03               # grow when eval success rate hasn't improved by 3%
     M_add: 6
-    cooldown_episodes: 500
-    min_episodes_before_grow: 99999   # no grows — pure width test
+    cooldown_episodes: 500      # eval_cooldown = max(2, 500//500) = 2 → grow eligible ep 1000
+    min_episodes_before_grow: 500
     max_hidden_layers: 6
     ema_beta: 0.9
-    use_eval_trigger_only: true
+    use_eval_trigger_only: true  # TD-error trigger disabled; only notify_eval fires
   belief:
     tau_belief_harden: 0.02
     tau_belief_prune: 0.3
@@ -99,8 +102,8 @@ gpf_agent:
     tau_prune: 1.0e-6
     prune_accum_steps: 1200
   freeze:
-    tau_freeze_delta: 0.005
-    tau_freeze_frac: 0.95
+    tau_freeze_delta: 0.01
+    tau_freeze_frac: 0.9
     freeze_check_interval: 300
-    freeze_patience: 5
-    min_episodes_before_freeze: 300
+    freeze_patience: 3
+    min_episodes_before_freeze: 99999  # no freeze during training

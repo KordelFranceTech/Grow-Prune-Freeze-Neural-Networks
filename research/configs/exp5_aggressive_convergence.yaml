@@ -1,23 +1,25 @@
-# Experiment 5: Best combined config — wider + longer budget + tuned grows.
+# Experiment 5: 64-wide, lower lr (5e-4), 4000 episodes.
 #
-# Takes whichever config performed best in exp3/exp4 and extends it:
-#   - 4000-episode budget for deeper convergence
-#   - 128 hidden units (wider, based on exp4)
-#   - Two well-timed grows (ep ~2000 and ep ~3000)
-#   - Softer prune (tau_prune=1e-5) to preserve more weights
-#   - Stronger whiff bonus for better plume tracking
-#   - Adjusted epsilon schedule for 4000-episode budget
+# Exp 2: 64-wide, lr=1e-3, 3000 eps → 91% best (peak ep 2500, decline to 87% by ep 3000)
+# Exp 4: 128-wide, lr=1e-3, 3000 eps → 85.5% best (policy oscillated: 85.5%→51.5%→83%)
+#
+# Hypothesis: The ep2500→3000 decline in exp2 (91%→87%) and the steeper oscillation in
+# exp4 both point to lr=1e-3 being too large for stable long-run convergence.
+# lr=5e-4 reduces step size → more stable optimization → policy holds its peak longer.
+# 4000 episodes gives time to converge fully (ε≈0.135 at ep4000 vs 0.223 at ep3000).
+#
+# Target: 92%+ by staying at the good policy rather than oscillating past it.
 
-name: exp5_best_combined
+name: exp5_lower_lr_longer
 seed: 42
 
 experiment:
   n_episodes: 4000
   eval_every: 500
   notes: >
-    Best combined: 128-wide network, 4000 episodes, two eval-triggered grows
-    (ep ~2000 and ~3000), softer prune. Consolidates all improvements from
-    exp2-exp4 into one configuration.
+    64-wide, lr=5e-4 (half of exp2), 4000 episodes. Same env as exp2.
+    Tests whether lower lr stabilizes the policy at/above 91% for longer,
+    enabling the extra 1000 episodes to push best success rate above 91%.
 
 simulator:
   dt: 0.1
@@ -64,12 +66,12 @@ tokenization:
 rl_agent:
   algorithm: expected_sarsa_nn
   network:
-    hidden_dim: 128
-    learning_rate: 1.0e-3
+    hidden_dim: 64
+    learning_rate: 5.0e-4          # half of exp2 → more stable optimization
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.05
-  epsilon_decay: 0.9996          # ε≈0.20 at ep 2000, ε≈0.08 at ep 4000
+  epsilon_decay: 0.9995
   n_episodes: 4000
   max_steps_per_episode: 600
   eval_every_episodes: 500
@@ -86,21 +88,22 @@ rl_agent:
 gpf_agent:
   output_dir: checkpoints/gpf/
   grow:
-    eps_add: 0.03               # success rate improvement threshold
+    eps_add: 0.03
     M_add: 6
-    cooldown_episodes: 1000     # eval_cooldown = 2 → 2-3 grows in 4000 eps
-    min_episodes_before_grow: 2000  # first grow at ep ~2000
+    cooldown_episodes: 500
+    min_episodes_before_grow: 99999   # no grows
     max_hidden_layers: 6
     ema_beta: 0.9
+    use_eval_trigger_only: true
   belief:
     tau_belief_harden: 0.02
     tau_belief_prune: 0.3
   prune:
-    tau_prune: 1.0e-5           # softest prune — preserve more weights
-    prune_accum_steps: 1500
+    tau_prune: 1.0e-6
+    prune_accum_steps: 1200
   freeze:
-    tau_freeze_delta: 0.005
-    tau_freeze_frac: 0.95
+    tau_freeze_delta: 0.01
+    tau_freeze_frac: 0.9
     freeze_check_interval: 300
-    freeze_patience: 5
-    min_episodes_before_freeze: 500
+    freeze_patience: 3
+    min_episodes_before_freeze: 99999  # no freeze — let policy adapt freely

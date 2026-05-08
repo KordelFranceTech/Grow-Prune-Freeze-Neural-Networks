@@ -152,6 +152,7 @@ class GPFExpectedSARSA:
         freeze_check_interval: int = 300,  # steps between weight-stability checks
         freeze_patience: int = 3,          # εf: consecutive stable checks to freeze
         min_episodes_before_freeze: int = 100,
+        use_eval_trigger_only: bool = False,
         seed: int = 0,
     ):
         torch.manual_seed(seed)
@@ -170,6 +171,7 @@ class GPFExpectedSARSA:
         self.min_episodes_before_grow = min_episodes_before_grow
         self.max_hidden_layers = max_hidden_layers
         self.ema_beta = ema_beta
+        self.use_eval_trigger_only = use_eval_trigger_only
 
         # Belief
         self._tau_belief_harden = tau_belief_harden
@@ -414,6 +416,8 @@ class GPFExpectedSARSA:
 
     def _maybe_grow(self, ep_avg_td: float):
         """Check grow trigger using episode-averaged TD error."""
+        if self.use_eval_trigger_only:
+            return
         if self.network.n_hidden >= self.max_hidden_layers:
             return
 

@@ -81,6 +81,7 @@ def build_gpf(env, rl_cfg, gpf_cfg, seed=0):
         freeze_check_interval=freeze.get('freeze_check_interval', 300),
         freeze_patience=freeze.get('freeze_patience', 3),
         min_episodes_before_freeze=freeze.get('min_episodes_before_freeze', 100),
+        use_eval_trigger_only=grow.get('use_eval_trigger_only', False),
         seed=seed,
     )
 
