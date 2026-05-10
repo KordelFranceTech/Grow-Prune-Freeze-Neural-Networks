@@ -356,3 +356,111 @@ Baseline: reactive chemotaxis policy (whiff-surge/cast).
 
 **Notes:** 64-wide, 4-layer max, early-chain grow (ep~1000/1500/2000), tau_prune=1e-6. Tests whether GPF's depth+sparsity beats the 2-layer dense ceiling of 92.5%.
 
+
+---
+
+## exp12_deeper_longer  —  2026-05-10 10:05
+
+| Field | Value |
+|---|---|
+| **Best success rate** | **90.50%** |
+| Final success rate | 0.00% |
+| Reactive baseline | 0.50% |
+| Episodes (budget) | 8000 |
+| Seed | 42 |
+| Elapsed | 2982s |
+| Grow events | 3 |
+| Prune events | 3 |
+| Freeze events | 0 |
+
+**Learning curve:** ep500:7.0%  ep1000:9.0%  ep1500:26.5%  ep2000:76.5%  ep2500:90.5%  ep3000:50.5%  ep3500:87.0%  ep4000:42.5%  ep4500:76.0%  ep5000:77.0%  ep5500:84.0%  ep6000:54.5%  ep6500:58.0%  ep7000:55.0%  ep7500:85.5%  ep8000:0.0%
+
+**Key hyperparameters:**
+- lr=0.001  γ=0.99  ε_decay=0.9995
+- eps_add=0.05  M_add=6  cooldown=400  warm_up=400
+- tau_prune=1e-07  prune_accum=1500
+- tau_freeze_delta=0.01  tau_freeze_frac=0.9  patience=3
+
+**Notes:** 64-wide, 4-layer max, 8000 eps. tau_prune=1e-7 (vs 1e-6 in exp11) reduces multi-layer prune disruption. Extra 3000 eps give 3-layer sparse network time to converge above exp11's 94.5% best.
+
+
+---
+
+## exp13_prune_once  —  2026-05-10 11:44
+
+| Field | Value |
+|---|---|
+| **Best success rate** | **94.50%** |
+| Final success rate | 24.00% |
+| Reactive baseline | 0.50% |
+| Episodes (budget) | 8000 |
+| Seed | 42 |
+| Elapsed | 3038s |
+| Grow events | 3 |
+| Prune events | 1 |
+| Freeze events | 0 |
+
+**Learning curve:** ep500:7.0%  ep1000:9.0%  ep1500:11.5%  ep2000:91.5%  ep2500:25.0%  ep3000:94.0%  ep3500:91.5%  ep4000:94.5%  ep4500:50.0%  ep5000:8.5%  ep5500:57.0%  ep6000:89.5%  ep6500:74.5%  ep7000:44.5%  ep7500:45.5%  ep8000:24.0%
+
+**Key hyperparameters:**
+- lr=0.001  γ=0.99  ε_decay=0.9995
+- eps_add=0.05  M_add=6  cooldown=400  warm_up=400
+- tau_prune=1e-06  prune_accum=1500
+- tau_freeze_delta=0.01  tau_freeze_frac=0.9  patience=3
+
+**Notes:** 64-wide, 4-layer max, 8000 eps, max_prune_events=1. Only the 1st grow triggers OBD pruning; subsequent grows add depth without re-pruning trained layers. Tests whether depth without cascading prune destruction exceeds 94.5%.
+
+
+---
+
+## exp12_rerun  —  2026-05-10 12:14
+
+| Field | Value |
+|---|---|
+| **Best success rate** | **90.50%** |
+| Final success rate | 90.50% |
+| Reactive baseline | 0.50% |
+| Episodes (budget) | 5000 |
+| Seed | 42 |
+| Elapsed | 1730s |
+| Grow events | 2 |
+| Prune events | 2 |
+| Freeze events | 0 |
+
+**Learning curve:** ep500:7.0%  ep1000:9.0%  ep1500:26.5%  ep2000:76.5%  ep2500:90.5%  ep3000:50.5%  ep3500:87.0%  ep4000:42.5%  ep4500:76.0%  ep5000:90.5%
+
+**Key hyperparameters:**
+- lr=0.001  γ=0.99  ε_decay=0.9995
+- eps_add=0.05  M_add=6  cooldown=400  warm_up=400
+- tau_prune=1e-07  prune_accum=1500
+- tau_freeze_delta=0.01  tau_freeze_frac=0.9  patience=3
+
+**Notes:** 64-wide, 4-layer max, 5000 eps (re-run; 8000 caused catastrophic collapse at ep8000 from cascading prune destruction). 5000 eps captures full 2-layer sparse convergence (peak ~90.5%) without entering the destructive 4-layer phase.
+
+
+---
+
+## exp11b_longer_episode  —  2026-05-10 15:47
+
+| Field | Value |
+|---|---|
+| **Best success rate** | **98.00%** |
+| Final success rate | 68.00% |
+| Reactive baseline | 0.00% |
+| Episodes (budget) | 5000 |
+| Seed | 42 |
+| Elapsed | 3708s |
+| Grow events | 3 |
+| Prune events | 3 |
+| Freeze events | 0 |
+
+**Learning curve:** ep500:24.5%  ep1000:95.5%  ep1500:40.5%  ep2000:97.5%  ep2500:91.5%  ep3000:98.0%  ep3500:95.5%  ep4000:96.5%  ep4500:95.5%  ep5000:68.0%
+
+**Key hyperparameters:**
+- lr=0.001  γ=0.99  ε_decay=0.9995
+- eps_add=0.05  M_add=6  cooldown=400  warm_up=400
+- tau_prune=1e-06  prune_accum=1500
+- tau_freeze_delta=0.01  tau_freeze_frac=0.9  patience=3
+
+**Notes:** Exp11 retrained with episode_length=100s (2x longer). Agent has 1200 steps instead of 600 to locate the source, reducing timeout rate on harder starts.
+

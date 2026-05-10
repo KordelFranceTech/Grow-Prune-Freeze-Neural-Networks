@@ -146,6 +146,7 @@ class GPFExpectedSARSA:
         # ---- GPF: prune (Table 7.1: εp) ----
         tau_prune: float = 1e-8,           # OBD saliency threshold
         prune_accum_steps: int = 500,      # εp: steps to accumulate g² before pruning
+        max_prune_events: int = 999,       # cap total prune events (prevents cascading)
         # ---- GPF: freeze (Table 7.1: εf, ϑf) ----
         tau_freeze_delta: float = 0.01,    # ϑf: weight change < this = stable
         tau_freeze_frac: float = 0.9,      # fraction of weights that must be stable
@@ -181,6 +182,7 @@ class GPFExpectedSARSA:
         # Prune
         self.tau_prune = tau_prune
         self.prune_accum_steps = prune_accum_steps
+        self.max_prune_events = max_prune_events
 
         # Freeze
         self.tau_freeze_delta = tau_freeze_delta
@@ -332,7 +334,8 @@ class GPFExpectedSARSA:
 
         # ---- Deferred prune ----
         if self._prune_pending and self._sq_grad_count >= self.prune_accum_steps:
-            self._prune_preceding_layers()
+            if len(self.prune_events) < self.max_prune_events:
+                self._prune_preceding_layers()
             self._prune_pending = False
 
         # ---- Weight-stability check for freeze ----
