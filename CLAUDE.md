@@ -80,3 +80,64 @@ Each top-level directory has its own `SKILL.md` describing what belongs there an
 ## Decision log
 
 When making non-obvious architectural choices (e.g., choosing rollout length, picking a scoring function, changing bin boundaries), append a short entry to `/DECISIONS.md` with the date, the choice, and the reasoning. This keeps the project debuggable months later.
+
+---
+
+## Current implementation status (as of 2026-05-11)
+
+The world-model pipeline described above is the long-term target. The active working implementation is a **GPF Expected SARSA** agent — a model-free RL baseline with adaptive network depth — used to establish navigation performance ceilings before the world model is built.
+
+### What's built
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| Filament plume simulator | `agent/env.py` (wraps `simulator/`) | Working |
+| Tokenizer | `tokenization/` | Working |
+| Baseline Expected SARSA (NN) | `agent/expected_sarsa.py` | Working |
+| GPF Expected SARSA | `agent/gpf_expected_sarsa.py` | Working |
+| Training harness | `train_gpf.py` | Working |
+| Inference / visualization | `visualize.py` | Working |
+| Research infra (experiment runner + log) | `research/` | Working |
+
+### Best result
+
+**98.0% navigation success rate** — `checkpoints/gpf/network_best_gpf.pt`
+
+- Config: `research/configs/exp_best.yaml` (alias for exp11b)
+- Architecture at best checkpoint: 3 hidden layers, 64-wide, ~48% sparse (OBD-pruned once)
+- Key insight: `episode_length=100s` (2× the original 50s) eliminated timeout failures on hard starts and was the dominant driver of improvement. Depth + sparsity (exp11) gave +2pp; episode length gave +3.5pp on top.
+
+### Running inference
+
+```bash
+python3 visualize.py --agent gpf --config research/configs/exp_best.yaml
+python3 visualize.py --agent gpf --config research/configs/exp_best.yaml --seed <N>
+```
+
+Output is written to `trajectory.png` (non-interactive backend).
+
+### Running a new experiment
+
+```bash
+python3 research/run_experiment.py --config research/configs/<your_config>.yaml
+```
+
+Results are auto-appended to `research/experiments_log.md`. Name the config `expN_description.yaml` and increment N from the last entry in the log.
+
+### Known issues / open problems
+
+1. **Cascading OBD prune destruction.** `_prune_preceding_layers()` in `agent/gpf_expected_sarsa.py` prunes all `n_hidden - 1` layers simultaneously after every grow. Keep ratios compound: 47% → 19% → 9%. The `max_prune_events` parameter (default 999; set to 1 in exp13) caps this but hasn't been tuned with sufficient episode budget to verify benefit at 100s episode length.
+
+2. **Second grow timing.** The grow trigger fires on stagnation of the EMA success rate (see `notify_eval()` in `gpf_expected_sarsa.py`). After the 2-layer sparse network peaks, the 2nd grow fires into a near-identity 3rd layer *and then* a 2nd prune hits 2 layers simultaneously. Adding `max_prune_events=1` to `exp_best.yaml` is the first thing to try if pushing past 98%.
+
+3. **No target network.** Extended training (8000+ eps) showed Q-value divergence. If experiments run longer, add a target network or reduce learning rate after each grow.
+
+### Experiment commit history (branch: init-gpf)
+
+| Commit | Config | Best SR | Key change |
+|--------|--------|---------|------------|
+| 04084fa | exp1 | ~13.5% | GPF infra + optimizer/init fixes |
+| 0893f75 | exp2 | 91.0% | Env fixes + reward shaping |
+| b7e379f | exp7 | 92.5% | Eval-triggered grow |
+| d5858ab | exp11 | 94.5% | 64-wide, 4-layer max, OBD prune |
+| c5bd507 | exp11b | **98.0%** | 2× episode length (50s → 100s) |
