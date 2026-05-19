@@ -98,6 +98,7 @@ The world-model pipeline described above is the long-term target. The active wor
 | Training harness | `train_gpf.py` | Working |
 | Inference / visualization | `visualize.py` | Working |
 | Research infra (experiment runner + log) | `research/` | Working |
+| Paper LaTeX sections + figure script | `gpf/` | Done |
 
 ### Best result
 
