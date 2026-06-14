@@ -12,7 +12,7 @@ The repo contains the code and experiments associated with the main body and app
 `visualize.py` runs everything needed to produce an _experiment_ located in the `./research` folder.
 The `./research/configs` folder contains previously run experiments used to acquire the optimal GPF architecture for the final model discussed in the main body of the paper.
 We recommend using Karpathy's [_autoresearch_](https://github.com/karpathy/autoresearch) concept to continually run experiments and tune GPFs for other tasks outside of those discussed in the paper.  
-
+Claude Code was used to continually run experiments in this fashion and the results of this can be found in the `./research/` and `./checkpoints` subdirs.
 The rest of the repository is structured as follows:
 
 
