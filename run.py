@@ -1,3 +1,5 @@
+# Helpful runner script to get results en masse
+ 
 import os
 import sys
 
