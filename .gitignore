@@ -3,3 +3,6 @@
 *__pycache__
 *.tex
 */trajectories/
+*.pdf
+*.md
+!*README.md
