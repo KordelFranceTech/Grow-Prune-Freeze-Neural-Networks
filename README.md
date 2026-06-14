@@ -4,6 +4,8 @@
 ----
 
 This repository is associated with the paper _Grow-Prune-Freeze Networks: Adaptive & Continual Learning Technique for Olfactory Navigation_ [1](https://arxiv.org/abs/2605.25170) [2](https://openreview.net/pdf?id=TPOM2VTfau) by Kordel France and Ovidiu Daescu.
+We present an early idea for a deep learning model that continually trains itself, adds its own layers, prunes low-rank neurons, and freezes key temporal knowledge.
+Our primary motivation for _GPFs_ was driven from a desire to have generalizable reinforcement learning models for olfactory navigation that could quickly adapt to the chemical plume's complexity.
 
 The repo contains the code and experiments associated with the main body and appendices of the paper.
 
