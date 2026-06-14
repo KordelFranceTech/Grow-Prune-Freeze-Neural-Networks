@@ -91,24 +91,17 @@ class _GPFQNetwork(nn.Module):
         """
         Append one H→H hidden layer before the output layer.
 
-        First grow (n_hidden == 1): seed layer is input_dim→H so deepcopy
-        would produce the wrong shape.  Create fresh H→H near-identity layer
-        to preserve the learned Q-function (dynamical isometry).
-
-        Subsequent grows: perturbed deepcopy of the last H→H layer, matching
-        the AdaptiveGPT reference implementation.
+        Always uses near-identity initialization (I + small noise), preserving
+        the learned Q-function via dynamical isometry regardless of grow count.
+        Deepcopy of a previously pruned layer is intentionally avoided: a pruned
+        layer may have ≤15% nonzero weights, which would cripple the new layer's
+        starting capacity.
         """
         H = self.hidden_dim
-        if len(self.hidden_layers) == 1:
-            new_layer = nn.Linear(H, H)
-            with torch.no_grad():
-                new_layer.weight.data = torch.eye(H) + 0.01 * torch.randn(H, H)
-                new_layer.bias.data = 0.01 * torch.randn(H)
-        else:
-            new_layer = copy.deepcopy(self.hidden_layers[-1])
-            with torch.no_grad():
-                for p in new_layer.parameters():
-                    p.data += 0.01 * torch.randn_like(p)
+        new_layer = nn.Linear(H, H)
+        with torch.no_grad():
+            new_layer.weight.data = torch.eye(H) + 0.01 * torch.randn(H, H)
+            new_layer.bias.data = 0.01 * torch.randn(H)
         self.hidden_layers.append(new_layer)
         return new_layer
 
@@ -153,12 +146,14 @@ class GPFExpectedSARSA:
         # ---- GPF: prune (Table 7.1: εp) ----
         tau_prune: float = 1e-8,           # OBD saliency threshold
         prune_accum_steps: int = 500,      # εp: steps to accumulate g² before pruning
+        max_prune_events: int = 999,       # cap total prune events (prevents cascading)
         # ---- GPF: freeze (Table 7.1: εf, ϑf) ----
         tau_freeze_delta: float = 0.01,    # ϑf: weight change < this = stable
         tau_freeze_frac: float = 0.9,      # fraction of weights that must be stable
         freeze_check_interval: int = 300,  # steps between weight-stability checks
         freeze_patience: int = 3,          # εf: consecutive stable checks to freeze
         min_episodes_before_freeze: int = 100,
+        use_eval_trigger_only: bool = False,
         seed: int = 0,
     ):
         torch.manual_seed(seed)
@@ -177,6 +172,7 @@ class GPFExpectedSARSA:
         self.min_episodes_before_grow = min_episodes_before_grow
         self.max_hidden_layers = max_hidden_layers
         self.ema_beta = ema_beta
+        self.use_eval_trigger_only = use_eval_trigger_only
 
         # Belief
         self._tau_belief_harden = tau_belief_harden
@@ -186,6 +182,7 @@ class GPFExpectedSARSA:
         # Prune
         self.tau_prune = tau_prune
         self.prune_accum_steps = prune_accum_steps
+        self.max_prune_events = max_prune_events
 
         # Freeze
         self.tau_freeze_delta = tau_freeze_delta
@@ -209,10 +206,14 @@ class GPFExpectedSARSA:
         self._n_episodes: int = 0
         self._episodes_since_grow: int = 0
 
-        # Grow: episode-level TD error history and EMA
+        # Grow: episode-level TD error history and EMA (legacy TD-based trigger)
         self._episode_td_buffer: list = []
         self._td_history: deque = deque(maxlen=M_add + 1)
         self._ema_improvement: float = 0.0
+
+        # Grow: eval-success-rate trigger (preferred for RL; set via notify_eval)
+        self._eval_sr_history: deque = deque(maxlen=M_add + 1)
+        self._evals_since_grow: int = 0
 
         # Prune: accumulated squared gradients
         self._sq_grad: dict = {}
@@ -333,7 +334,8 @@ class GPFExpectedSARSA:
 
         # ---- Deferred prune ----
         if self._prune_pending and self._sq_grad_count >= self.prune_accum_steps:
-            self._prune_preceding_layers()
+            if len(self.prune_events) < self.max_prune_events:
+                self._prune_preceding_layers()
             self._prune_pending = False
 
         # ---- Weight-stability check for freeze ----
@@ -360,11 +362,65 @@ class GPFExpectedSARSA:
             self._maybe_grow(ep_avg)
 
     # ------------------------------------------------------------------
+    # Eval-based grow trigger (RL-appropriate: use success rate, not TD error)
+    # ------------------------------------------------------------------
+
+    def notify_eval(self, success_rate: float):
+        """
+        Call this after every evaluation run with the greedy success rate.
+
+        In RL, TD error is non-monotone and its improvement EMA stays near zero
+        regardless of actual learning progress.  Success rate is a cleaner signal:
+        grow when it has been flat (< eps_add improvement over M_add evals).
+
+        This overrides the episode-level TD-error grow trigger when called.
+        """
+        if self.network.n_hidden >= self.max_hidden_layers:
+            return
+
+        self._eval_sr_history.append(success_rate)
+        self._evals_since_grow += 1
+
+        if self._n_episodes < self.min_episodes_before_grow:
+            return
+        if len(self._eval_sr_history) < 2:
+            return
+
+        # Minimum cooldown in *evals* (converted from episode cooldown / eval_every).
+        # We store as episodes; here we use a raw eval count of at least 2.
+        eval_cooldown = max(2, self.cooldown_episodes // 500)
+        if self._evals_since_grow < eval_cooldown:
+            return
+
+        sr_list = list(self._eval_sr_history)
+        best_recent = max(sr_list[-max(2, len(sr_list) // 2):])
+        best_early  = max(sr_list[:max(1, len(sr_list) // 2)])
+        improvement = best_recent - best_early
+
+        if improvement < self.eps_add:
+            n_before = self.network.n_hidden
+            new_layer = self.network.add_hidden_layer()
+            self._add_belief_slots()
+            self._freeze_stable_count.append(0)
+            print(
+                f"[GPF] GROW (eval-trigger)  layer {n_before}→{self.network.n_hidden}  "
+                f"(ep={self._n_episodes}, sr_improve={improvement:.4g}, "
+                f"best_sr={max(sr_list):.2%})"
+            )
+            self._init_sq_grad_accum()
+            self._prune_pending = True
+            self._optimizer_add_layer(new_layer)
+            self._episodes_since_grow = 0
+            self._evals_since_grow = 0
+
+    # ------------------------------------------------------------------
     # GPF — GROW (episode-level, Table 7.1: εe / εk)
     # ------------------------------------------------------------------
 
     def _maybe_grow(self, ep_avg_td: float):
         """Check grow trigger using episode-averaged TD error."""
+        if self.use_eval_trigger_only:
+            return
         if self.network.n_hidden >= self.max_hidden_layers:
             return
 
@@ -393,7 +449,7 @@ class GPFExpectedSARSA:
 
         if self._ema_improvement < self.eps_add:
             n_before = self.network.n_hidden
-            self.network.add_hidden_layer()
+            new_layer = self.network.add_hidden_layer()
             self._add_belief_slots()
             self._freeze_stable_count.append(0)
             print(
@@ -402,7 +458,7 @@ class GPFExpectedSARSA:
             )
             self._init_sq_grad_accum()
             self._prune_pending = True
-            self._rebuild_optimizer()
+            self._optimizer_add_layer(new_layer)
             self._episodes_since_grow = 0
 
     # ------------------------------------------------------------------
@@ -525,12 +581,32 @@ class GPFExpectedSARSA:
         )
 
     # ------------------------------------------------------------------
-    # Optimiser rebuild (called after grow or freeze)
+    # Optimiser management (grow → add_param_group; freeze → state-preserving)
     # ------------------------------------------------------------------
 
+    def _optimizer_add_layer(self, new_layer: nn.Module):
+        """Add a just-grown layer's parameters as a new param group.
+
+        Using add_param_group preserves all accumulated Adam first/second moment
+        estimates for the existing layers — no momentum is discarded on grow.
+        """
+        new_params = [p for p in new_layer.parameters() if p.requires_grad]
+        self.optimizer.add_param_group({'params': new_params, 'lr': self.lr})
+
     def _rebuild_optimizer(self):
+        """Rebuild optimizer after a freeze event, preserving Adam state.
+
+        After a layer is frozen its parameters are excluded from the new
+        optimizer's param list.  We copy the Adam state tensors (exp_avg,
+        exp_avg_sq, step) for every parameter that survived, so the frozen
+        layer's removal doesn't reset the momentum of the remaining layers.
+        """
+        old_state = dict(self.optimizer.state)
         trainable = [p for p in self.network.parameters() if p.requires_grad]
         self.optimizer = torch.optim.Adam(trainable, lr=self.lr)
+        for p in trainable:
+            if p in old_state:
+                self.optimizer.state[p] = old_state[p]
 
     # ------------------------------------------------------------------
     # Persistence

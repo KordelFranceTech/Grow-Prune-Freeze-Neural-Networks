@@ -1,0 +1,108 @@
+# Experiment 7: 64-wide + two eval-triggered grows + lr=5e-4 + 5000 eps.
+#
+# Exp 6: 64-wide + one grow (ep ~1000) → target 94%+.
+# Exp 7 hypothesis: a second grow at ep ~2500 (when the 2-layer network stagnates)
+# adds a third layer, giving the agent capacity to learn an even finer policy
+# in the final 2500 episodes of a 5000-episode budget.
+#
+# With use_eval_trigger_only=true, grows only fire on success-rate stagnation.
+# Second grow fires only if success rate hasn't improved by 3% over M_add=6 evals.
+
+name: exp7_extended_single_grow
+seed: 42
+
+experiment:
+  n_episodes: 5000
+  eval_every: 500
+  notes: >
+    Same as exp6 (64-wide, lr=1e-3, eval-triggered grow at ep ~2000) but with
+    5000 episode budget. Exp6 showed 90.5% at ep4000 still climbing — 1000
+    more episodes expected to push above exp2's 91% ceiling. Same grow config:
+    grow fires when success rate improvement < 3% over recent evals.
+
+simulator:
+  dt: 0.1
+  episode_length: 50
+  domain_size: [20.0, 20.0]
+  source_position: random
+  source_strength: 5.0
+  filament:
+    diffusion_rate: 0.05
+    decay_time: 30.0
+    initial_radius: 0.01
+    mass: 0.1
+  wind:
+    type: ornstein_uhlenbeck
+    mean_speed: 1.0
+    mean_direction: 0.0
+    direction_volatility: 15.0
+    speed_volatility: 0.2
+    correlation_time: 2.0
+  sensors:
+    antenna_separation: 0.1
+    antenna_forward_offset: 0.08
+    noise_floor_sigma: 0.001
+    saturation: 1.0
+  agent:
+    forward_speed: 0.5
+    turn_rate: 90.0
+    cast_amplitude: 30.0
+  success_radius: 0.5
+
+tokenization:
+  vocabulary_version: v1
+  concentration_bin_edges: [3.0, 6.0, 15.0, 45.0, 150.0, 600.0]
+  wind_n_octants: 8
+  wind_zero_threshold: 0.05
+  actions:
+    - forward
+    - turn_left_15
+    - turn_right_15
+    - turn_around
+    - cast_left
+    - cast_right
+
+rl_agent:
+  algorithm: expected_sarsa_nn
+  network:
+    hidden_dim: 64
+    learning_rate: 1.0e-3
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 0.9995
+  n_episodes: 5000
+  max_steps_per_episode: 600
+  eval_every_episodes: 500
+  output_dir: checkpoints/gpf/
+  reward:
+    source_found: 100.0
+    time_penalty: -0.01
+    whiff_bonus: 1.0
+    blank_penalty: -0.05
+    whiff_threshold_multiplier: 3.0
+    blank_penalty_duration: 2.0
+    distance_shaping: 2.0
+
+gpf_agent:
+  output_dir: checkpoints/gpf/
+  grow:
+    eps_add: 0.03
+    M_add: 6
+    cooldown_episodes: 500
+    min_episodes_before_grow: 500
+    max_hidden_layers: 6
+    ema_beta: 0.9
+    use_eval_trigger_only: true
+  belief:
+    tau_belief_harden: 0.02
+    tau_belief_prune: 0.3
+  prune:
+    tau_prune: 1.0e-6
+    prune_accum_steps: 1200
+  freeze:
+    tau_freeze_delta: 0.01
+    tau_freeze_frac: 0.9
+    freeze_check_interval: 300
+    freeze_patience: 3
+    min_episodes_before_freeze: 99999

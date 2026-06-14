@@ -76,11 +76,13 @@ def build_gpf(env, rl_cfg, gpf_cfg, seed=0):
         n_total_steps=n_total,
         tau_prune=prune.get('tau_prune', 1e-8),
         prune_accum_steps=prune.get('prune_accum_steps', 500),
+        max_prune_events=prune.get('max_prune_events', 999),
         tau_freeze_delta=freeze.get('tau_freeze_delta', 0.01),
         tau_freeze_frac=freeze.get('tau_freeze_frac', 0.9),
         freeze_check_interval=freeze.get('freeze_check_interval', 300),
         freeze_patience=freeze.get('freeze_patience', 3),
         min_episodes_before_freeze=freeze.get('min_episodes_before_freeze', 100),
+        use_eval_trigger_only=grow.get('use_eval_trigger_only', False),
         seed=seed,
     )
 

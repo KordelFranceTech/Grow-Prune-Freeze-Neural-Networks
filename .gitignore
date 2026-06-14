@@ -1,3 +1,8 @@
 *.DS_STORE
 *.idea
 *__pycache__
+*.tex
+*/trajectories/
+*.pdf
+*.md
+!*README.md

@@ -4,7 +4,7 @@ Standalone script: load a saved network and visualize one navigation episode.
 Usage:
     python3 visualize.py                           # baseline PyTorch agent
     python3 visualize.py --agent gpf               # GPF agent
-    python3 visualize.py --agent custom            # NumPy custom agent
+    python3 visualize.py --agent custom            # NumPy custom agent (no PyTorch)
     python3 visualize.py --agent custom --config configs/custom_agent_config.yaml
     python3 visualize.py --weights checkpoints/rl/network_final.pt --seed 5
     python3 visualize.py --save trajectory.png     # save instead of showing interactively

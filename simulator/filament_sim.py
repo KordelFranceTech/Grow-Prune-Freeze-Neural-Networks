@@ -68,18 +68,24 @@ class FilamentSimulator:
         self._apply_action(int(action))
         self._step += 1
 
+        # Reflect position off domain walls instead of terminating.
+        # The agent has no boundary signal in its observation, so terminating
+        # on out-of-bounds means it can never learn to avoid walls.  Reflecting
+        # boundaries allow longer episodes, more gradient signal, and make the
+        # reactive baseline non-zero (so it can serve as a meaningful comparison).
+        self.agent_pos = np.clip(self.agent_pos, 0.0, self._domain)
+
         obs = self._get_obs()
         dist = float(np.linalg.norm(self.agent_pos - self.source_pos))
         success_r = self.cfg.get('success_radius', 0.5)
         success = dist < success_r
-        in_bounds = np.all((self.agent_pos >= 0) & (self.agent_pos <= self._domain))
-        done = success or self._step >= self._max_steps or not in_bounds
+        done = success or self._step >= self._max_steps
 
         info = {
             'success': success,
             'dist_to_source': dist,
             'step': self._step,
-            'in_bounds': in_bounds,
+            'in_bounds': True,   # always in bounds with reflecting walls
         }
         return obs, done, info
 

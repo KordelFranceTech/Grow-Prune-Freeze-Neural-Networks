@@ -1,0 +1,117 @@
+# Experiment 11: 64-wide, max 4 layers, aggressive early-grow schedule, OBD sparsity.
+#
+# User hypothesis: a deeper but more sparse network may outperform the 2-layer dense
+# ceiling of 92.5%. GPF is designed exactly for this — grow depth early (while the
+# policy is still low) and prune between grows so each layer stays sparse.
+#
+# Design:
+#   - 64-wide (proven stable; 128-wide oscillates too much)
+#   - max_hidden_layers=4 (allow up to 4 layers)
+#   - min_episodes_before_grow=400, cooldown=400 → grows can chain at ep500/1000/1500
+#   - eps_add=0.05 (fires on <5% stagnation — nearly always triggers at the 500-ep mark
+#     given typical early trajectories of 7%→9%)
+#   - Expected grow timeline: layer 2 at ep~1000, layer 3 at ep~1500, layer 4 at ep~2000
+#   - prune fires after each grow (prune_accum_steps=1500 steps post-grow)
+#   - tau_prune=1e-6 (keeps ~55-65% of 64-wide weights per prune event)
+#   - After all 3 grows and prunes, the 4-layer network has ~(0.6)^3 ≈ 22% of max
+#     possible connections active — deep and sparse, faithful to GPF's design intent
+#   - 3000 post-final-grow episodes for the sparse 4-layer policy to converge
+#
+# If 4-layer sparse > 2-layer dense (92.5%), confirms depth+sparsity hypothesis.
+
+name: exp11_deeper_sparse
+seed: 42
+
+experiment:
+  n_episodes: 5000
+  eval_every: 500
+  notes: >
+    64-wide, 4-layer max, early-chain grow (ep~1000/1500/2000), tau_prune=1e-6.
+    Tests whether GPF's depth+sparsity beats the 2-layer dense ceiling of 92.5%.
+
+simulator:
+  dt: 0.1
+  episode_length: 50
+  domain_size: [20.0, 20.0]
+  source_position: random
+  source_strength: 5.0
+  filament:
+    diffusion_rate: 0.05
+    decay_time: 30.0
+    initial_radius: 0.01
+    mass: 0.1
+  wind:
+    type: ornstein_uhlenbeck
+    mean_speed: 1.0
+    mean_direction: 0.0
+    direction_volatility: 15.0
+    speed_volatility: 0.2
+    correlation_time: 2.0
+  sensors:
+    antenna_separation: 0.1
+    antenna_forward_offset: 0.08
+    noise_floor_sigma: 0.001
+    saturation: 1.0
+  agent:
+    forward_speed: 0.5
+    turn_rate: 90.0
+    cast_amplitude: 30.0
+  success_radius: 0.5
+
+tokenization:
+  vocabulary_version: v1
+  concentration_bin_edges: [3.0, 6.0, 15.0, 45.0, 150.0, 600.0]
+  wind_n_octants: 8
+  wind_zero_threshold: 0.05
+  actions:
+    - forward
+    - turn_left_15
+    - turn_right_15
+    - turn_around
+    - cast_left
+    - cast_right
+
+rl_agent:
+  algorithm: expected_sarsa_nn
+  network:
+    hidden_dim: 64
+    learning_rate: 1.0e-3
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 0.9995
+  n_episodes: 5000
+  max_steps_per_episode: 600
+  eval_every_episodes: 500
+  output_dir: checkpoints/gpf/
+  reward:
+    source_found: 100.0
+    time_penalty: -0.01
+    whiff_bonus: 1.0
+    blank_penalty: -0.05
+    whiff_threshold_multiplier: 3.0
+    blank_penalty_duration: 2.0
+    distance_shaping: 2.0
+
+gpf_agent:
+  output_dir: checkpoints/gpf/
+  grow:
+    eps_add: 0.05            # fires on <5% stagnation — chains grows quickly while policy is still low
+    M_add: 6
+    cooldown_episodes: 400   # short cooldown → can grow at ep~1000, 1500, 2000
+    min_episodes_before_grow: 400
+    max_hidden_layers: 4     # allow up to 4 layers
+    ema_beta: 0.9
+    use_eval_trigger_only: true
+  belief:
+    tau_belief_harden: 0.02
+    tau_belief_prune: 0.3
+  prune:
+    tau_prune: 1.0e-6        # 64-wide: keeps ~55-65% of weights per prune event
+    prune_accum_steps: 1500  # moderate accumulation per grow event
+  freeze:
+    tau_freeze_delta: 0.01
+    tau_freeze_frac: 0.9
+    freeze_check_interval: 300
+    freeze_patience: 3
+    min_episodes_before_freeze: 99999
